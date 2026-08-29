@@ -1,0 +1,601 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>编辑者 — 视觉小说</title>
+<style>
+/* 样式和之前一样，省略以节省篇幅 */
+* { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+body { font-family: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', Tahoma, sans-serif; background: #000; color: #e0e0e0; overflow: hidden; height: 100vh; width: 100vw; user-select: none; -webkit-user-select: none; }
+#game-container { position: relative; width: 100%; height: 100%; overflow: hidden; }
+#background { position: absolute; inset: 0; background-size: cover; background-position: center; background-color: #0a0a1e; z-index: 1; }
+#background::after { content: ''; position: absolute; inset: 0; background: linear-gradient(to bottom, rgba(0,0,0,0.3) 0%, rgba(0,0,0,0.1) 50%, rgba(0,0,0,0.7) 100%); z-index: 2; }
+#dialogue-box { position: absolute; bottom: 0; left: 0; right: 0; background: linear-gradient(to bottom, rgba(10,10,20,0.85) 0%, rgba(5,5,15,0.95) 100%); border-top: 2px solid rgba(0,180,255,0.3); padding: 20px; z-index: 10; min-height: 180px; backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
+#speaker-name { font-size: 1.1em; font-weight: bold; color: #00d4ff; margin-bottom: 10px; text-shadow: 0 0 10px rgba(0,212,255,0.5); min-height: 1.3em; }
+#dialogue-text { font-size: 1em; line-height: 1.7; color: #e0e0e0; min-height: 80px; position: relative; padding-right: 30px; }
+#dialogue-text::after { content: '▼'; position: absolute; bottom: 0; right: 0; color: #00d4ff; animation: blink 1s infinite; opacity: 0; }
+#dialogue-text.completed::after { opacity: 1; }
+@keyframes blink { 0%, 50% { opacity: 1; } 51%, 100% { opacity: 0.3; } }
+#choices { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 15; display: none; flex-direction: column; gap: 15px; width: 85%; max-width: 500px; }
+.choice-btn { background: rgba(10,10,30,0.9); border: 2px solid rgba(0,180,255,0.4); color: #e0e0e0; padding: 15px 20px; font-size: 1em; cursor: pointer; transition: all 0.3s ease; text-align: left; font-family: inherit; }
+.choice-btn:hover { background: rgba(0,180,255,0.2); border-color: #00d4ff; }
+#menu-btn { position: absolute; top: 20px; right: 20px; background: rgba(10,10,30,0.8); border: 2px solid rgba(0,180,255,0.4); color: #00d4ff; padding: 10px 15px; cursor: pointer; z-index: 20; font-size: 1.2em; font-family: inherit; }
+#pause-menu { position: absolute; inset: 0; background: rgba(0,0,0,0.9); z-index: 100; display: none; justify-content: center; align-items: center; }
+#pause-content { background: rgba(10,10,30,0.95); border: 2px solid rgba(0,180,255,0.4); padding: 30px; max-width: 500px; width: 90%; }
+#pause-content h2 { color: #00d4ff; margin-bottom: 20px; text-align: center; }
+.menu-btn { background: rgba(0,180,255,0.1); border: 2px solid rgba(0,180,255,0.4); color: #e0e0e0; padding: 12px 20px; margin: 8px 0; width: 100%; cursor: pointer; font-size: 1em; font-family: inherit; }
+.menu-btn:hover { background: rgba(0,180,255,0.3); border-color: #00d4ff; }
+#start-screen { position: absolute; inset: 0; background: linear-gradient(135deg, #0a0a1e 0%, #1a1a3e 100%); z-index: 50; display: flex; flex-direction: column; justify-content: center; align-items: center; padding: 20px; }
+#start-screen h1 { font-size: 3em; color: #00d4ff; text-shadow: 0 0 20px rgba(0,212,255,0.8); margin-bottom: 10px; letter-spacing: 8px; text-align: center; }
+#start-screen .subtitle { font-size: 1.2em; color: #a0a0a0; margin-bottom: 40px; font-style: italic; }
+.start-btn { background: rgba(0,180,255,0.2); border: 2px solid #00d4ff; color: #00d4ff; padding: 15px 40px; font-size: 1.2em; cursor: pointer; margin: 10px; min-width: 200px; font-family: inherit; }
+.start-btn:hover { background: rgba(0,180,255,0.4); }
+.rain-overlay { position: absolute; inset: 0; pointer-events: none; z-index: 4; opacity: 0.2; background-image: linear-gradient(transparent 0%, rgba(0,180,255,0.05) 50%, transparent 100%); background-size: 2px 100px; animation: rain 0.5s linear infinite; }
+@keyframes rain { 0% { background-position: 0 0; } 100% { background-position: 0 100px; } }
+</style>
+</head>
+<body>
+
+<div id="game-container">
+  <div id="background"></div>
+  <div class="rain-overlay"></div>
+  <div id="dialogue-box">
+    <div id="speaker-name"></div>
+    <div id="dialogue-text"></div>
+  </div>
+  <div id="choices"></div>
+  <button id="menu-btn">☰</button>
+  <div id="pause-menu"><div id="pause-content"></div></div>
+  <div id="start-screen">
+    <h1>编 辑 者</h1>
+    <div class="subtitle">视觉小说</div>
+    <button class="start-btn" id="btn-new-game">新游戏</button>
+    <button class="start-btn" id="btn-load">读取存档</button>
+  </div>
+</div>
+
+<script>
+const SCENES = {
+  intro: {
+    bg: 'https://image.qwenlm.ai/public_source/dc06e91f-6adf-4904-ad69-5b3ad0ac8a69/193a5ae03-1075-4fbc-b110-90afd784f8a8.png',
+    dialogues: [
+      { speaker: '旁白', text: '瓦尔恩-德尔塔。2071年。' },
+      { speaker: '旁白', text: '在这里，死人的价格比活人更贵。' },
+      { speaker: '旁白', text: '三大档案馆掌管着意识的数字副本。记忆交易，是这座城市唯一的生意。' },
+      { speaker: '罗曼', text: '我叫罗曼·塔恩。我是一名编辑者。' },
+      { speaker: '罗曼', text: '死者的家属会找上门，请我在副本载入档案馆之前，把那些见不得光的东西擦干净。' },
+      { speaker: '罗曼', text: '抹掉羞耻的记忆。磨平性格的棱角。让一个死人，在永恒里看起来体面些。' },
+      { speaker: '罗曼', text: '说白了，就是死后的公关。' },
+      { speaker: '旁白', text: '我的磁盘里，躺着前妻卡佳的一份损坏副本。' },
+      { speaker: '旁白', text: '我既没法完整恢复她，也下不了手删除。' },
+      { speaker: '旁白', text: '副本总是卡顿，说到一半就断掉。但偶尔，它会冒出几句卡佳生前从未说过的话。' },
+      { speaker: '旁白', text: '我一直把这归咎于坏道。' },
+      { speaker: '旁白', text: '今天的雨下得格外大。有人敲门。' }
+    ],
+    next: 'lera_arrival'
+  },
+  lera_arrival: {
+    bg: 'https://image.qwenlm.ai/public_source/dc06e91f-6adf-4904-ad69-5b3ad0ac8a69/1cf3e998c-4e9e-44ca-9a9f-d644906a998e.png',
+    dialogues: [
+      { speaker: '罗曼', text: '我打开门。门口站着一个女人。衣服很贵，但手在抖。' },
+      { speaker: '罗曼', text: '紧张。害怕。' },
+      { speaker: '莱拉', text: '您是罗曼·塔恩吗？有人告诉我，您是下层区最好的编辑者。' },
+      { speaker: '罗曼', text: '那得看您需要什么。' },
+      { speaker: '莱拉', text: '我哥哥。达维德。三天前去世了。' },
+      { speaker: '莱拉', text: '官方说法是药物过量。但尸体是在船舱区找到的——那片半淹没的废墟，他生前从不去那儿。' },
+      { speaker: '罗曼', text: '船舱区？死在那儿可不太像意外。' },
+      { speaker: '莱拉', text: '我希望他在档案馆里看起来干干净净。没有问题。没有多余的回忆。' },
+      { speaker: '罗曼', text: '标准的清理？把最后那几天抹掉？' },
+      { speaker: '莱拉', text: '对。最后七十二小时的所有记忆。' },
+      { speaker: '罗曼', text: '这活儿不便宜。七十二小时的记忆量很大，处理起来费时费力。' },
+      { speaker: '莱拉', text: '钱不是问题。这是定金。' },
+      { speaker: '旁白', text: '她把一张信用芯片放在桌上。上面的数字，够在上层区买一套公寓。' },
+      { speaker: '罗曼', text: '好。我接了。' }
+    ],
+    next: 'terminal_work'
+  },
+  terminal_work: {
+    bg: 'https://image.qwenlm.ai/public_source/dc06e91f-6adf-4904-ad69-5b3ad0ac8a69/193a5ae03-1075-4fbc-b110-90afd784f8a8.png',
+    dialogues: [
+      { speaker: '旁白', text: '启动终端。接入达维德的副本。' },
+      { speaker: '旁白', text: '第一眼就看出问题——最后七十二小时的记忆，被军用算法加密了。' },
+      { speaker: '罗曼', text: '该死。这东西家用软件根本打不开。' },
+      { speaker: '旁白', text: '但我继续往下挖。在更早期的记忆层里，童年的片段和早晨咖啡的回忆之间……' },
+      { speaker: '旁白', text: '藏着一段文字信息。' },
+      { speaker: '旁白', text: '收件人是我。寄件人是一个我从未见过的人。' },
+      { speaker: '旁白', text: '「卡佳没有坏。她被人藏起来了。别删这个文件，否则她会死第二次。」' },
+      { speaker: '罗曼', text: '什么……' },
+      { speaker: '旁白', text: '手在发抖。卡佳。我的卡佳。' },
+      { speaker: '旁白', text: '有人故意把卡佳那份损坏的副本，塞进了别人的死亡里。像藏了一笔私房钱。' },
+      { speaker: '罗曼', text: '她不是坏掉的文件。她是人质。' }
+    ],
+    next: 'choice_1'
+  },
+  choice_1: {
+    bg: 'https://image.qwenlm.ai/public_source/dc06e91f-6adf-4904-ad69-5b3ad0ac8a69/193a5ae03-1075-4fbc-b110-90afd784f8a8.png',
+    dialogues: [
+      { speaker: '旁白', text: '怎么办？莱拉在等回复。但我发现了一些她不知道的东西。' }
+    ],
+    choices: [
+      { text: '把发现告诉莱拉', next: 'tell_lera' },
+      { text: '隐瞒发现，自己想办法破解', next: 'hide_discovery' }
+    ]
+  },
+  tell_lera: {
+    bg: 'https://image.qwenlm.ai/public_source/dc06e91f-6adf-4904-ad69-5b3ad0ac8a69/1cf3e998c-4e9e-44ca-9a9f-d644906a998e.png',
+    dialogues: [
+      { speaker: '罗曼', text: '莱拉，我在你哥哥的副本里发现了点奇怪的东西。' },
+      { speaker: '罗曼', text: '一条信息。是写给我的。关于我妻子。' },
+      { speaker: '旁白', text: '她的表情变了。一瞬间是恐惧。然后是算计。' },
+      { speaker: '莱拉', text: '您的妻子？可她不是……' },
+      { speaker: '罗曼', text: '死了。对。但她的副本……不只是损坏那么简单。有人把她藏起来了。' },
+      { speaker: '莱拉', text: '有意思。' },
+      { speaker: '旁白', text: '她掏出通讯器，飞快地打字。' },
+      { speaker: '莱拉', text: '罗曼，我得说实话。达维德不只是我哥哥。' },
+      { speaker: '莱拉', text: '他是「矢量」档案馆的信使。' },
+      { speaker: '罗曼', text: '那他那个「药物过量」呢？' },
+      { speaker: '莱拉', text: '是清理。有人干掉了他。我想我知道是谁。' },
+      { speaker: '罗曼', text: '谁？' },
+      { speaker: '莱拉', text: '「子午线」馆。竞争对手。他们想要达维德运送的东西。' },
+      { speaker: '莱拉', text: '帮我从他记忆里把那东西弄出来。我帮你找到你妻子。' }
+    ],
+    next: 'lera_deal'
+  },
+  hide_discovery: {
+    bg: 'https://image.qwenlm.ai/public_source/dc06e91f-6adf-4904-ad69-5b3ad0ac8a69/193a5ae03-1075-4fbc-b110-90afd784f8a8.png',
+    dialogues: [
+      { speaker: '罗曼', text: '没什么。标准的清理。有点复杂，但我会搞定。' },
+      { speaker: '旁白', text: '莱拉点点头。离开了。' },
+      { speaker: '旁白', text: '我一个人对着终端，还有那条关于卡佳的信息。' },
+      { speaker: '罗曼', text: '如果她真是人质，我得弄清楚是谁关着她。' },
+      { speaker: '旁白', text: '我开始往更深处挖。接触档案馆的人。' },
+      { speaker: '旁白', text: '我知道一个地方。船舱区的黑市。那里有人买卖破解过的副本。' }
+    ],
+    next: 'trium_market'
+  },
+  lera_deal: {
+    bg: 'https://image.qwenlm.ai/public_source/dc06e91f-6adf-4904-ad69-5b3ad0ac8a69/1cf3e998c-4e9e-44ca-9a9f-d644906a998e.png',
+    dialogues: [
+      { speaker: '莱拉', text: '我需要进入那加密的七十二小时。三大档案馆都在抢里面的东西。' },
+      { speaker: '罗曼', text: '而我要卡佳。' },
+      { speaker: '莱拉', text: '成交。但有个问题。「子午线」馆已经盯上你了。他们会来。' },
+      { speaker: '罗曼', text: '什么时候？' },
+      { speaker: '莱拉', text: '今晚。你有两个选择：逃，或者跟他们见面。' }
+    ],
+    choices: [
+      { text: '逃到船舱区，去黑市找帮手', next: 'trium_market' },
+      { text: '留下，见「子午线」馆的人', next: 'meridian_meeting' }
+    ]
+  },
+  trium_market: {
+    bg: 'https://image.qwenlm.ai/public_source/dc06e91f-6adf-4904-ad69-5b3ad0ac8a69/10a309d72-6d1d-4fdf-a1c5-6c86e74671b7.png',
+    dialogues: [
+      { speaker: '旁白', text: '船舱区。半淹没的城区。集装箱，生锈的起重机，黑色的水。' },
+      { speaker: '旁白', text: '空气里弥漫着铁锈和死亡的味道。' },
+      { speaker: '旁白', text: '我找到了市场。一间旧仓库的地下室。' },
+      { speaker: '旁白', text: '什么都卖：偷来的密码，死者的副本。' }
+    ],
+    next: 'old_smuggler'
+  },
+  old_smuggler: {
+    bg: 'https://image.qwenlm.ai/public_source/dc06e91f-6adf-4904-ad69-5b3ad0ac8a69/120d5eba6-f258-4360-ae10-2330677ebc61.png',
+    dialogues: [
+      { speaker: '罗曼', text: '我想打听一下达维德·斯特恩。' },
+      { speaker: '老人', text: '斯特恩？那个信使？那小子死前一天来过这儿。' },
+      { speaker: '老人', text: '他说他运的不是数据。是钥匙。' },
+      { speaker: '罗曼', text: '什么的钥匙？' },
+      { speaker: '老人', text: '没说。但走之前，他把这个留给了我。' },
+      { speaker: '旁白', text: '老人递过来一个老旧的存储器。' },
+      { speaker: '老人', text: '他说：「要是有谁来问卡佳的事，把这个给他。」' }
+    ],
+    next: 'tech_girl'
+  },
+  tech_girl: {
+    bg: 'https://image.qwenlm.ai/public_source/dc06e91f-6adf-4904-ad69-5b3ad0ac8a69/1d05faa74-bbc2-432f-9318-d7b404c7e4b1.png',
+    dialogues: [
+      { speaker: '罗曼', text: '我需要破解军用加密。你能搞吗？' },
+      { speaker: '技术员', text: '看里面是什么。' },
+      { speaker: '技术员', text: '这不是普通的加密。这是个容器。里面是一块意识碎片。活的。' },
+      { speaker: '技术员', text: '钥匙在达维德最后那七十二小时里。我能破解，但要花时间。' }
+    ],
+    next: 'meridian_arrives'
+  },
+  meridian_meeting: {
+    bg: 'https://image.qwenlm.ai/public_source/dc06e91f-6adf-4904-ad69-5b3ad0ac8a69/1103bee43-dec4-4715-a8c7-c88bf87adb66.png',
+    dialogues: [
+      { speaker: '旁白', text: '深夜。敲门声。三短两长。' },
+      { speaker: '维克多', text: '罗曼·塔恩。我叫维克多。我代表「子午线」馆。' },
+      { speaker: '维克多', text: '达维德·斯特恩替我们运送一件珍贵的东西。您在它的副本里找到了。' },
+      { speaker: '维克多', text: '一笔交易。您把数据交给我们。我们把您的妻子还给您。' },
+      { speaker: '罗曼', text: '你们怎么知道卡佳的事？' },
+      { speaker: '维克多', text: '我们什么都知道。我给您一个选择：幽灵，或者虚无。' }
+    ],
+    choices: [
+      { text: '接受交易', next: 'ending_clean_copy' },
+      { text: '拒绝，逃走', next: 'trium_market' }
+    ]
+  },
+  meridian_arrives: {
+    bg: 'https://image.qwenlm.ai/public_source/dc06e91f-6adf-4904-ad69-5b3ad0ac8a69/10a309d72-6d1d-4fdf-a1c5-6c86e74671b7.png',
+    dialogues: [
+      { speaker: '旁白', text: '技术员开始破解。突然——警报。有人在砸仓库的门。' },
+      { speaker: '技术员', text: '操！他们找到我们了！' },
+      { speaker: '罗曼', text: '还要多久？' },
+      { speaker: '技术员', text: '两分钟！' }
+    ],
+    choices: [
+      { text: '守住终端，给技术员争取时间', next: 'defend_terminal' },
+      { text: '抓起存储器，从后门逃走', next: 'escape_back' }
+    ]
+  },
+  defend_terminal: {
+    bg: 'https://image.qwenlm.ai/public_source/dc06e91f-6adf-4904-ad69-5b3ad0ac8a69/10a309d72-6d1d-4fdf-a1c5-6c86e74671b7.png',
+    dialogues: [
+      { speaker: '旁白', text: '我冲向门口。用集装箱把门堵死。' },
+      { speaker: '旁白', text: '技术员：好了！破解完了！' },
+      { speaker: '旁白', text: '屏幕上——达维德最后那七十二小时。还有提取卡佳的钥匙。' },
+      { speaker: '旁白', text: '门轰然倒下。但已经晚了。数据在我手里。' }
+    ],
+    next: 'kati_hologram'
+  },
+  escape_back: {
+    bg: 'https://image.qwenlm.ai/public_source/dc06e91f-6adf-4904-ad69-5b3ad0ac8a69/10a309d72-6d1d-4fdf-a1c5-6c86e74671b7.png',
+    dialogues: [
+      { speaker: '旁白', text: '我抓起存储器。朝后门狂奔。' },
+      { speaker: '旁白', text: '我手里有存储器。但破解还没完成。得找个新地方。' }
+    ],
+    next: 'final_choice'
+  },
+  kati_hologram: {
+    bg: 'https://image.qwenlm.ai/public_source/dc06e91f-6adf-4904-ad69-5b3ad0ac8a69/151355acd-05ac-4d44-bf4d-5416547af005.png',
+    dialogues: [
+      { speaker: '旁白', text: '我启动提取。全息投影在房间里亮起。卡佳。' },
+      { speaker: '卡佳', text: '罗曼……你找到我了。' },
+      { speaker: '罗曼', text: '卡佳？真的是你吗？' },
+      { speaker: '卡佳', text: '是我的一部分。剩下的……在达维德那里。' },
+      { speaker: '卡佳', text: '我没有坏。我把自己写进了他的死亡里，为了逃走。' },
+      { speaker: '罗曼', text: '逃走？逃离我？' },
+      { speaker: '卡佳', text: '你没有放开我，罗曼。哪怕我死了。' }
+    ],
+    next: 'final_choice'
+  },
+  final_choice: {
+    bg: 'https://image.qwenlm.ai/public_source/dc06e91f-6adf-4904-ad69-5b3ad0ac8a69/193a5ae03-1075-4fbc-b110-90afd784f8a8.png',
+    dialogues: [
+      { speaker: '旁白', text: '卡佳是自己藏起来的。她不是人质。她是逃走的。' },
+      { speaker: '旁白', text: '现在我面前有几个选择。' }
+    ],
+    choices: [
+      { text: '强行恢复卡佳，哪怕她不愿意', next: 'ending_clean_copy' },
+      { text: '抹掉一切。全部格式化。', next: 'ending_format' },
+      { text: '把卡佳缝进我自己的副本。', next: 'ending_merge' },
+      { text: '放卡佳走。给她自由。', next: 'ending_source_code' }
+    ]
+  },
+  ending_clean_copy: {
+    bg: 'https://image.qwenlm.ai/public_source/dc06e91f-6adf-4904-ad69-5b3ad0ac8a69/193a5ae03-1075-4fbc-b110-90afd784f8a8.png',
+    dialogues: [
+      { speaker: '旁白', text: '我恢复了卡佳。她开口了。说话。笑。' },
+      { speaker: '旁白', text: '但她太完美了。这不是卡佳。是由我的记忆拼凑出来的幽灵。' },
+      { speaker: '旁白', text: '有时候夜里，我觉得真正的卡佳正从黑暗里看着我。在哭。' },
+      { speaker: '旁白', text: '—— 结局：纯净副本 ——' }
+    ]
+  },
+  ending_format: {
+    bg: 'https://image.qwenlm.ai/public_source/dc06e91f-6adf-4904-ad69-5b3ad0ac8a69/193a5ae03-1075-4fbc-b110-90afd784f8a8.png',
+    dialogues: [
+      { speaker: '旁白', text: '我抹掉了一切。达维德的副本。卡佳的副本。所有数据。' },
+      { speaker: '旁白', text: '干净的磁盘。寂静。只有窗外的雨。和心里的空。' },
+      { speaker: '旁白', text: '—— 结局：格式化 ——' }
+    ]
+  },
+  ending_merge: {
+    bg: 'https://image.qwenlm.ai/public_source/dc06e91f-6adf-4904-ad69-5b3ad0ac8a69/193a5ae03-1075-4fbc-b110-90afd784f8a8.png',
+    dialogues: [
+      { speaker: '旁白', text: '我把卡佳的意识缝进了我自己的副本里。' },
+      { speaker: '旁白', text: '现在我们被锁在同一个文件中。一个脑袋里的两个声音。' },
+      { speaker: '旁白', text: '渐渐地，两个声音融成了一个。' },
+      { speaker: '旁白', text: '—— 结局：拼接 ——' }
+    ]
+  },
+  ending_source_code: {
+    bg: 'https://image.qwenlm.ai/public_source/dc06e91f-6adf-4904-ad69-5b3ad0ac8a69/10a309d72-6d1d-4fdf-a1c5-6c86e74671b7.png',
+    dialogues: [
+      { speaker: '旁白', text: '我放走了卡佳。擦掉钥匙。销毁容器。' },
+      { speaker: '卡佳', text: '谢谢你，罗曼。' },
+      { speaker: '旁白', text: '窗外的雨停了。多年来第一次，我看见了星星。' },
+      { speaker: '旁白', text: '—— 结局：源代码 ——' }
+    ]
+  }
+};
+
+class Game {
+  constructor() {
+    this.currentScene = null;
+    this.currentDialogue = 0;
+    this.isTyping = false;
+    this.typeInterval = null;
+    this.autoAdvanceTimer = null;
+    this.audioCtx = null;
+    this.voices = []; // 存储系统语音
+    this.voiceMap = {}; // 角色到语音的映射
+  }
+
+  initAudio() {
+    if (this.audioCtx) return;
+    try {
+      this.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    } catch(e) {}
+  }
+
+  playTick() {
+    if (!this.audioCtx) return;
+    try {
+      const osc = this.audioCtx.createOscillator();
+      const gain = this.audioCtx.createGain();
+      osc.connect(gain);
+      gain.connect(this.audioCtx.destination);
+      osc.frequency.value = 800;
+      gain.gain.value = 0.02;
+      osc.start();
+      gain.gain.exponentialRampToValueAtTime(0.001, this.audioCtx.currentTime + 0.02);
+      osc.stop(this.audioCtx.currentTime + 0.02);
+    } catch(e) {}
+  }
+
+  // 加载系统语音并分配给角色
+  loadVoices() {
+    if (!('speechSynthesis' in window)) return;
+    this.voices = speechSynthesis.getVoices();
+    // 筛选中文语音
+    const zhVoices = this.voices.filter(v => v.lang.includes('zh') || v.lang.includes('cmn'));
+    
+    // 尝试找到不同的语音（男声/女声）
+    // 通常系统会有多个语音，比如 Microsoft 晓妍 (女), 云健 (男), 云希 (女) 等
+    const maleVoice = zhVoices.find(v => v.name.includes('男') || v.name.includes('云健') || v.name.includes('David') || v.name.includes('Mark'));
+    const femaleVoice1 = zhVoices.find(v => v.name.includes('女') || v.name.includes('晓妍') || v.name.includes('云希') || v.name.includes('Zira'));
+    const femaleVoice2 = zhVoices.find((v, i) => i > 0 && v.lang.includes('zh') && v !== femaleVoice1);
+    const femaleVoice3 = zhVoices.find((v, i) => i > 1 && v.lang.includes('zh') && v !== femaleVoice1 && v !== femaleVoice2);
+    const oldMaleVoice = maleVoice || zhVoices[0]; // 回退
+
+    // 分配角色
+    this.voiceMap = {
+      '罗曼': maleVoice || zhVoices[0],
+      '莱拉': femaleVoice1 || zhVoices[0],
+      '卡佳': femaleVoice2 || zhVoices[0],
+      '老人': oldMaleVoice || zhVoices[0],
+      '技术员': femaleVoice3 || zhVoices[0],
+      '维克多': maleVoice || zhVoices[0],
+      '旁白': zhVoices[0] // 默认
+    };
+    console.log('可用中文语音:', zhVoices.map(v => v.name));
+    console.log('角色语音分配:', Object.entries(this.voiceMap).map(([k, v]) => `${k}: ${v ? v.name : '默认'}`));
+  }
+
+  speak(text, speaker) {
+    if (!('speechSynthesis' in window)) return;
+    speechSynthesis.cancel();
+    const utter = new SpeechSynthesisUtterance(text);
+    utter.lang = 'zh-CN';
+    
+    // 分配语音
+    const voice = this.voiceMap[speaker];
+    if (voice) {
+      utter.voice = voice;
+    }
+    
+    // 根据角色调整音高和语速（作为补充）
+    switch(speaker) {
+      case '罗曼':
+        utter.pitch = 0.8;
+        utter.rate = 0.8;
+        break;
+      case '莱拉':
+        utter.pitch = 1.2;
+        utter.rate = 0.85;
+        break;
+      case '卡佳':
+        utter.pitch = 1.4;
+        utter.rate = 0.7;
+        break;
+      case '老人':
+        utter.pitch = 0.7;
+        utter.rate = 0.75;
+        break;
+      case '技术员':
+        utter.pitch = 1.0;
+        utter.rate = 0.95;
+        break;
+      case '维克多':
+        utter.pitch = 0.9;
+        utter.rate = 0.8;
+        break;
+      default: // 旁白
+        utter.pitch = 1.0;
+        utter.rate = 0.85;
+    }
+    
+    speechSynthesis.speak(utter);
+  }
+
+  stopSpeak() {
+    if ('speechSynthesis' in window) {
+      speechSynthesis.cancel();
+    }
+  }
+
+  start() {
+    this.initAudio();
+    if (this.audioCtx && this.audioCtx.state === 'suspended') {
+      this.audioCtx.resume();
+    }
+    // 加载语音
+    this.loadVoices();
+    // 如果语音是异步加载的，再调一次
+    if (speechSynthesis.onvoiceschanged !== undefined) {
+      speechSynthesis.onvoiceschanged = () => this.loadVoices();
+    }
+    
+    document.getElementById('start-screen').style.display = 'none';
+    document.getElementById('pause-menu').style.display = 'none';
+    this.loadScene('intro');
+  }
+
+  loadScene(sceneId) {
+    const scene = SCENES[sceneId];
+    if (!scene) return;
+    
+    this.currentScene = sceneId;
+    this.currentDialogue = 0;
+    
+    const bg = document.getElementById('background');
+    bg.style.backgroundImage = `url("${scene.bg}")`;
+    
+    this.showDialogue();
+  }
+
+  showDialogue() {
+    const scene = SCENES[this.currentScene];
+    if (!scene) return;
+
+    if (this.currentDialogue >= scene.dialogues.length) {
+      if (scene.choices) {
+        this.showChoices(scene.choices);
+      } else if (scene.next) {
+        this.loadScene(scene.next);
+      }
+      return;
+    }
+
+    const dialogue = scene.dialogues[this.currentDialogue];
+    const speakerEl = document.getElementById('speaker-name');
+    const textEl = document.getElementById('dialogue-text');
+
+    speakerEl.textContent = dialogue.speaker || '';
+    textEl.textContent = '';
+    textEl.classList.remove('completed');
+
+    if (this.typeInterval) clearInterval(this.typeInterval);
+    if (this.autoAdvanceTimer) clearTimeout(this.autoAdvanceTimer);
+    this.stopSpeak();
+
+    this.isTyping = true;
+    let charIndex = 0;
+    const text = dialogue.text;
+
+    this.typeInterval = setInterval(() => {
+      if (charIndex < text.length) {
+        textEl.textContent += text[charIndex];
+        this.playTick();
+        charIndex++;
+      } else {
+        clearInterval(this.typeInterval);
+        this.typeInterval = null;
+        this.isTyping = false;
+        textEl.classList.add('completed');
+        
+        // 语音播报
+        this.speak(text, dialogue.speaker);
+        
+        const readTime = Math.max(3000, text.length * 200);
+        this.autoAdvanceTimer = setTimeout(() => {
+          this.stopSpeak();
+          this.currentDialogue++;
+          this.showDialogue();
+        }, readTime);
+      }
+    }, 40);
+  }
+
+  advanceDialogue() {
+    if (this.isTyping) {
+      if (this.typeInterval) clearInterval(this.typeInterval);
+      this.typeInterval = null;
+      this.isTyping = false;
+      const scene = SCENES[this.currentScene];
+      const dialogue = scene.dialogues[this.currentDialogue];
+      document.getElementById('dialogue-text').textContent = dialogue.text;
+      document.getElementById('dialogue-text').classList.add('completed');
+      
+      this.speak(dialogue.text, dialogue.speaker);
+      
+      if (this.autoAdvanceTimer) clearTimeout(this.autoAdvanceTimer);
+      const readTime = Math.max(3000, dialogue.text.length * 200);
+      this.autoAdvanceTimer = setTimeout(() => {
+        this.stopSpeak();
+        this.currentDialogue++;
+        this.showDialogue();
+      }, readTime);
+    } else {
+      if (this.autoAdvanceTimer) clearTimeout(this.autoAdvanceTimer);
+      this.stopSpeak();
+      this.currentDialogue++;
+      this.showDialogue();
+    }
+  }
+
+  showChoices(choices) {
+    this.stopSpeak();
+    const choicesEl = document.getElementById('choices');
+    choicesEl.innerHTML = '';
+    choicesEl.style.display = 'flex';
+
+    choices.forEach(choice => {
+      const btn = document.createElement('button');
+      btn.className = 'choice-btn';
+      btn.textContent = choice.text;
+      btn.onclick = (e) => {
+        e.stopPropagation();
+        choicesEl.style.display = 'none';
+        this.loadScene(choice.next);
+      };
+      choicesEl.appendChild(btn);
+    });
+  }
+
+  openPauseMenu() {
+    this.stopSpeak();
+    const content = document.getElementById('pause-content');
+    content.innerHTML = `
+      <h2>菜单</h2>
+      <button class="menu-btn" id="resume-btn">继续</button>
+      <button class="menu-btn" id="restart-btn">重新开始</button>
+      <button class="menu-btn" id="menu-btn2">返回主菜单</button>
+    `;
+    document.getElementById('pause-menu').style.display = 'flex';
+    
+    document.getElementById('resume-btn').onclick = () => {
+      document.getElementById('pause-menu').style.display = 'none';
+    };
+    document.getElementById('restart-btn').onclick = () => {
+      document.getElementById('pause-menu').style.display = 'none';
+      this.loadScene('intro');
+    };
+    document.getElementById('menu-btn2').onclick = () => {
+      document.getElementById('pause-menu').style.display = 'none';
+      document.getElementById('start-screen').style.display = 'flex';
+    };
+  }
+}
+
+const game = new Game();
+
+document.getElementById('btn-new-game').onclick = () => game.start();
+document.getElementById('menu-btn').onclick = () => game.openPauseMenu();
+
+document.getElementById('game-container').addEventListener('click', (e) => {
+  if (e.target.closest('button') || e.target.closest('#choices') || e.target.closest('#start-screen') || e.target.closest('#pause-menu')) return;
+  game.advanceDialogue();
+});
+
+document.addEventListener('keydown', (e) => {
+  if (e.code === 'Space') {
+    e.preventDefault();
+    game.advanceDialogue();
+  }
+});
+</script>
+
+</body>
+</html>
